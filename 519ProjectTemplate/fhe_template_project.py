@@ -7,6 +7,8 @@ import networkx as nx
 from random import random
 import matplotlib.pyplot as plt
 import numpy as np
+import csv
+import os
 
 # Using networkx, generate a random graph
 # You can change the way you generate the graph
@@ -135,23 +137,19 @@ def simulate(n):
 
     return compiletime, keygenerationtime, encryptiontime, executiontime, decryptiontime, referenceexecutiontime, mse
 
-def PlotResults(parametername, arrparam, arr_numberofnodes):
+def PlotSingleResult(parametername, arrparam, arr_numberofnodes):
     data = np.array_split(arrparam, len(arr_numberofnodes))
     fig = plt.figure(figsize =(10, 7))
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_xticklabels(arr_numberofnodes)
-    bp = ax.boxplot(data)
-    plt.title(parametername + " vs Node Count")
+    ax.set_xlabel('Number of Nodes')
+    ax.set_ylabel(parametername)
+    ax.boxplot(data)
     plt.show()
 
-if __name__ == "__main__":
-    simcnt = 100 #The number of simulation runs, set it to 3 during development otherwise you will wait for a long time
-    # For benchmarking you must set it to a large number, e.g., 100
-    #Note that file is opened in append mode, previous results will be kept in the file
-    resultfile = open("results.csv", "w")  # Measurement results are collated in this file for you to plot later on
-    resultfile.write("NodeCount,PathLength,SimCnt,CompileTime,KeyGenerationTime,EncryptionTime,ExecutionTime,DecryptionTime,ReferenceExecutionTime,Mse\n")
-    resultfile.close()
 
+def PlotResults():    
+    arr_nodecount = []
     arr_compiletime = []
     arr_keygenerationtime = []
     arr_encryptiontime = []
@@ -159,37 +157,56 @@ if __name__ == "__main__":
     arr_decryptiontime = []
     arr_referenceexecutiontime = []
     arr_mse = []
+    
+    filename = open('results.csv', 'r')
+    file = csv.DictReader(filename)
+    
+    # iterating over each row and append values
+    for col in file:
+        arr_compiletime.append(float(col['CompileTime']))
+        arr_keygenerationtime.append(float(col['KeyGenerationTime']))
+        arr_encryptiontime.append(float(col['EncryptionTime']))
+        arr_executiontime.append(float(col['ExecutionTime']))
+        arr_decryptiontime.append(float(col['DecryptionTime']))
+        arr_referenceexecutiontime.append(float(col['ReferenceExecutionTime']))
+        arr_mse.append(float(col['Mse']))
+        if int(col['SimCnt']) == 0:
+            arr_nodecount.append(int(col['NodeCount']))
+                             
+    PlotSingleResult("Compile Time", arr_compiletime,arr_nodecount)
+    PlotSingleResult("Key Generation Time", arr_keygenerationtime, arr_nodecount)
+    PlotSingleResult("Encryption Time", arr_encryptiontime, arr_nodecount)
+    PlotSingleResult("Execution Time", arr_executiontime, arr_nodecount)
+    PlotSingleResult("Decryption Time", arr_decryptiontime, arr_nodecount)
+    PlotSingleResult("Reference Execution Time", arr_referenceexecutiontime, arr_nodecount)
+    PlotSingleResult("MSE", arr_mse, arr_nodecount) 
 
-    arr_numberofnodes = []
+
+if __name__ == "__main__":
+    simcnt = 50 #The number of simulation runs, set it to 3 during development otherwise you will wait for a long time
+    # For benchmarking you must set it to a large number, e.g., 100
+    #Note that file is opened in append mode, previous results will be kept in the file
+    resultfile = open("results.csv", "w")  # Measurement results are collated in this file for you to plot later on
+    resultfile.write("NodeCount,SimCnt,CompileTime,KeyGenerationTime,EncryptionTime,ExecutionTime,DecryptionTime,ReferenceExecutionTime,Mse\n")
+    resultfile.close()
     
     print("Simulation campaing started:")
 
     for nc in range(36,64,4): # Node counts for experimenting various graph sizes
         n = nc
-        arr_numberofnodes.append(n)
+        #arr_numberofnodes.append(n)
         resultfile = open("results.csv", "a") 
         for i in range(simcnt):
             #Call the simulator
             compiletime, keygenerationtime, encryptiontime, executiontime, decryptiontime, referenceexecutiontime, mse = simulate(n)
             res = str(n) + "," + str(i) + "," + str(compiletime) + "," + str(keygenerationtime) + "," +  str(encryptiontime) + "," +  str(executiontime) + "," +  str(decryptiontime) + "," +  str(referenceexecutiontime) + "," +  str(mse) + "\n"
+            #res = str(n) + "," + str(i) + "," + "{:.5f}".format(compiletime) + "," + "{:.5f}".format(keygenerationtime) + "," +  "{:.5f}".format(encryptiontime) + "," +  "{:.5f}".format(executiontime) + "," +  "{:.5f}".format(decryptiontime) + "," +  "{:.5f}".format(referenceexecutiontime) + "," +  "{:.9f}".format(mse) + "\n"
             print(res)
             resultfile.write(res)
-
-            arr_compiletime.append(compiletime)
-            arr_keygenerationtime.append(keygenerationtime)
-            arr_encryptiontime.append(encryptiontime)
-            arr_executiontime.append(executiontime)
-            arr_decryptiontime.append(decryptiontime)
-            arr_referenceexecutiontime.append(referenceexecutiontime)
-            arr_mse.append(mse)
             
         resultfile.close()
 
-    PlotResults("Compile Time", arr_compiletime,arr_numberofnodes)
-    PlotResults("Key Generation Time", arr_keygenerationtime, arr_numberofnodes)
-    PlotResults("Encryption Time", arr_encryptiontime, arr_numberofnodes)
-    PlotResults("Execution Time", arr_executiontime, arr_numberofnodes)
-    PlotResults("Decryption Time", arr_decryptiontime, arr_numberofnodes)
-    PlotResults("Reference Execution Time", arr_referenceexecutiontime, arr_numberofnodes)
-    PlotResults("MSE", arr_mse, arr_numberofnodes)
+    
+    PlotResults()
+
     
