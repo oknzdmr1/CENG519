@@ -1,8 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import csv
+import warnings
 
 def plotSingleResult(parametername, arrparam, arr_numberofnodes):
+    warnings.filterwarnings("ignore")
     data = np.array_split(arrparam, len(arr_numberofnodes))
     fig = plt.figure(figsize =(10, 7))
     ax = fig.add_axes([0, 0, 1, 1])
@@ -11,6 +13,7 @@ def plotSingleResult(parametername, arrparam, arr_numberofnodes):
     ax.set_ylabel(parametername)
     ax.boxplot(data)
     plt.show()
+
 
 
 def plotResults():    
@@ -38,10 +41,10 @@ def plotResults():
         if int(col['SimCnt']) == 0:
             arr_nodecount.append(int(col['NodeCount']))
                              
-    plotSingleResult("Compile Time", arr_compiletime,arr_nodecount)
-    plotSingleResult("Key Generation Time", arr_keygenerationtime, arr_nodecount)
-    plotSingleResult("Encryption Time", arr_encryptiontime, arr_nodecount)
-    plotSingleResult("Execution Time", arr_executiontime, arr_nodecount)
-    plotSingleResult("Decryption Time", arr_decryptiontime, arr_nodecount)
-    plotSingleResult("Reference Execution Time", arr_referenceexecutiontime, arr_nodecount)
+    plotSingleResult("Compile Time (ms)", arr_compiletime,arr_nodecount)
+    plotSingleResult("Key Generation Time (ms)", arr_keygenerationtime, arr_nodecount)
+    plotSingleResult("Encryption Time (ms)", arr_encryptiontime, arr_nodecount)
+    plotSingleResult("Execution Time (ms)", arr_executiontime, arr_nodecount)
+    plotSingleResult("Decryption Time (ms)", arr_decryptiontime, arr_nodecount)
+    plotSingleResult("Reference Execution Time (ms)", arr_referenceexecutiontime, arr_nodecount)
     plotSingleResult("MSE", arr_mse, arr_nodecount) 

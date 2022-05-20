@@ -1,20 +1,20 @@
-from eva import EvaProgram, Input, Output, evaluate
-from eva.ckks import CKKSCompiler
-from eva.seal import generate_keys
-from eva.metric import valuation_mse
-import timeit
+from eva import EvaProgram, Input, Output
 import networkx as nx
 from random import random
 import matplotlib.pyplot as plt
 import numpy as np
 from plot import plotResults
 from DFS import iterativeDFS
+from common import evaCommon
+import math
 
 
+ERROR_MARGIN = 0.1
 vector_size = 4096
+initialnode = 0
 numberofnodes = 0
-stack = []
-responded = []
+stack = []  
+client_response = []
 firstpass = True
 finished = False
 result = []
@@ -61,15 +61,16 @@ def printGraph(graph,n):
 # Eva will then encrypt them
 def prepareInput(n, m):
     input = {}
-    GG = generateGraph(n,3,0.5)
+    GG = generateGraph(n,3,0.6)
     graph, graphdict = serializeGraphZeroOne(GG,m)
-    printGraph(graph,n)
+    #printGraph(graph,n)
     input['Graph'] = graph
     return input, graph
 
+
+# Shift an element from 'inpos' position to 'outpos' position and mask all others
 def accessElement(graph, inpos, outpos):
     dummyList = []
-    
     for i in range(vector_size):
         if i == outpos:
             dummyList.append(1)
@@ -82,84 +83,102 @@ def accessElement(graph, inpos, outpos):
     #print(str(inpos) + ", " + str(outpos) + ", " + str(numberofshift))
     return reval
 
-def FindNodes2Check(graph, currentnode, numberofnodes):
+# Decide if the node is a potential candidate for the next iterations
+def isCheckingRequired(node):
+    if not visited[node]: 
+        if stack.count(node) == 0: 
+            return True
+
+    return False
+
+def visitNode(currentnode):
+    global visited
+    global result
+    global stack
+
+    if not visited[currentnode]:
+        visited[currentnode] = True
+        result.append(currentnode)
+        stack.pop()    
+
+
+# Find all possible adjacent nodes of the current node to ask client if there is an edge
+def findNodes2Check(graph, currentnode, numberofnodes):
     nodes2check = []
     for i in range(vector_size):
         nodes2check.append(0) 
 
     index = 0
     for i in range(numberofnodes):
-        if not visited[i]:
-            if stack.count(i) == 0:
-                #print("Nodes to check: " + str(currentnode * numberofnodes + i))
-                newlist = accessElement(graph, currentnode * numberofnodes + i, index)
-                nodes2check = nodes2check + newlist
-                index = index + 1
+        if isCheckingRequired(i):   # Add to list
+            newlist = accessElement(graph, currentnode * numberofnodes + i, index)
+            nodes2check = nodes2check + newlist
+            index = index + 1
+  
+    numberofnodes2check = index
+    return nodes2check, numberofnodes2check
 
-    return nodes2check
+    
 
-# This is the dummy analytic service
-# You will implement this service based on your selected algorithm
-# you can other parameters using global variables !!! do not change the signature of this function
-# 
-# Note that you cannot compute everything using EVA/CKKS
-# For instance, comparison is not possible
-# You can add, subtract, multiply, negate, shift right/left
-# You will have to implement an interface with the trusted entity for comparison (send back the encrypted values, push the trusted entity to compare and get the comparison output)
+
 def graphanalticprogram(graph):
 
-    print("********************************")
+    #print("********************************")
     global firstpass
     global finished
     global numberofnodes
-    global responded
+    global client_response
     global stack
     global visited
+    global initialnode
 
     if firstpass:
-        #print("First Pass")
         firstpass = False
-        stack.append(0)
-        nodes2check = FindNodes2Check(graph, 0, numberofnodes)
+        stack.append(initialnode)
+        nodes2check, length = findNodes2Check(graph, initialnode, numberofnodes)
         return nodes2check
 
     if not firstpass:
+        
         currentnode = stack[-1]
-        
-        print("Stack:" + str(stack))
-        if not visited[currentnode]:
-            visited[currentnode] = True
-            #print("Visited:" + str(currentnode))
-            result.append(currentnode)
-            stack.pop()
-        
-        
-        #print("Response" + str(responded))
-        #print("visited: " + str(visited)) 
 
+        #print("Stack:" + str(stack))
+        #print("Client Response:" + str(client_response))
+        visitNode(currentnode)
+
+        # add the adjacent vetices of the current vertex according to client answer
         index = 0
         for i in range(numberofnodes):
-            #print("***Checking Node: " + str(i))
-            if not visited[i]:
-                #print("not visited: ")
-                if stack.count(i) == 0:
-                    #print("not in the stack: ")
-                    index = index + 1
-                    if responded[index-1]:
-                        #print("Adding to stack: "+ str(i))
-                        stack.append(i)
+             if isCheckingRequired(i):
+                if client_response[index]:
+                    stack.append(i)
+                index = index + 1    
 
-        if len(stack):
-            finished = True
-            print(result)
-            return result                  
+        while True:
+            # Stack empty. Either all vertices are visited or graph is disconnected. End of the DFS
+            if len(stack) == 0:
+                finished = True
+                print("DFS Result with fhe: " + str(result)) 
+                return graph 
 
-        nodes2check = FindNodes2Check(graph, currentnode, numberofnodes)
+            # Create a list to ask client if there is an edge or not
+            currentnode = stack[-1]
+            nodes2check, length = findNodes2Check(graph, currentnode, numberofnodes)
+            
+            # if there is no edge to ask, continue to iterate the stack
+            if length == 0:
+                visitNode(currentnode)
+            else:
+                break
+
         return nodes2check
 
-        
-
-    
+# Calculate required vector size
+def calculateVectorSize(inputsize):
+    x = math.log(inputsize, 2)
+    x = math.ceil(x)
+    return 2**(x+1)
+  
 # Do not change this 
 # the parameter n can be passed in the call from simulate function
 class EvaProgramDriver(EvaProgram):
@@ -179,43 +198,49 @@ class EvaProgramDriver(EvaProgram):
 # n is the number of nodes in your graph
 # If you require additional parameters, add them
 def simulate(n):
-    m = vector_size
+    
+    global vector_size
+    global initialnode
+
+    # vector size is adapted according to input/output size
+    m = vector_size = calculateVectorSize(n*n)
+    #print("vector size: " + str(vector_size))
+
     print("Will start simulation for ", n)
-    config = {}
-    config['warn_vec_size'] = 'false'
-    config['lazy_relinearize'] = 'true'
-    config['rescaler'] = 'always'
-    config['balance_reductions'] = 'true'
     inputs, g= prepareInput(n, m)
 
-    iterativeDFS(g, 0, n)
+    initialnode = 1 # select node to start
 
-    compiletime = 0
-    keygenerationtime  = 0
-    encryptiontime = 0
-    executiontime = 0
-    decryptiontime = 0
-    referenceexecutiontime = 0
-    mse = 0
+    result_nofhe = iterativeDFS(g, initialnode, n)
+    print("DFS Result no fhe: " + str(result_nofhe)) 
 
+    t_compiletime = t_keygenerationtime = t_encryptiontime = t_executiontime = t_decryptiontime = t_referenceexecutiontime = t_mse = 0
+
+    #
     global finished
     global visited
     global numberofnodes
     global result
     global firstpass
-    global responded
+    global client_response
 
+    #prepare variables for fhe algorithm
     numberofnodes = n
     firstpass = True
     finished = False
     result.clear()
     stack.clear()
     visited.clear()
+
     for i in range(numberofnodes):
         visited.append(False)
 
-    counter = 0
+    numberofiteration = 0 # for debug purpose
+
+    # Run until DFS is finished. At every iteration server prepares a list to ask client if an edge exist or not. After the client response a new iteration begins
     while not finished:
+
+        numberofiteration += 1
 
         graphanaltic = EvaProgramDriver("graphanaltic", vec_size=m,n=n)
         with graphanaltic:
@@ -224,81 +249,59 @@ def simulate(n):
             Output('ReturnedValue', reval)
     
         prog = graphanaltic
-        prog.set_output_ranges(30)
-        prog.set_input_scales(30)
+        prog.set_output_ranges(25)
+        prog.set_input_scales(25)
 
-        start = timeit.default_timer()
-        compiler = CKKSCompiler(config=config)
-        compiled_multfunc, params, signature = compiler.compile(prog)
-        compiletime += (timeit.default_timer() - start) * 1000.0 #ms
+        outputs, compiletime, keygenerationtime, encryptiontime, executiontime, decryptiontime, referenceexecutiontime, mse = evaCommon(prog, inputs)
+        
+        # Add the measurements of each iteration to find a total time or error value
+        t_compiletime += compiletime
+        t_keygenerationtime += keygenerationtime
+        t_encryptiontime += encryptiontime
+        t_executiontime += executiontime
+        t_decryptiontime += decryptiontime
+        t_referenceexecutiontime += referenceexecutiontime
+        t_mse += mse
 
-        start = timeit.default_timer()
-        public_ctx, secret_ctx = generate_keys(params)
-        keygenerationtime = (timeit.default_timer() - start) * 1000.0 #ms
-    
-        start = timeit.default_timer()
-        encInputs = public_ctx.encrypt(inputs, signature)
-        encryptiontime += (timeit.default_timer() - start) * 1000.0 #ms
+        client_response.clear()
 
-        start = timeit.default_timer()
-        encOutputs = public_ctx.execute(compiled_multfunc, encInputs)
-        executiontime += (timeit.default_timer() - start) * 1000.0 #ms
-
-        start = timeit.default_timer()
-        outputs = secret_ctx.decrypt(encOutputs, signature)
-        decryptiontime += (timeit.default_timer() - start) * 1000.0 #ms
-
-        responded.clear()
-
+        # Error Margin can be adopted according to eva parameters. Change in the Eva parameters may require yto change this error margin
         for key in outputs:
             for i in range(numberofnodes):
-                #print(outputs[key][i])
-                if (outputs[key][i] < 1.02) and (outputs[key][i] > 0.98):
-                    responded.append(True)
+                if (outputs[key][i] < 1+ERROR_MARGIN) and (outputs[key][i] > 1-ERROR_MARGIN):
+                    client_response.append(True)
+                    #print(outputs[key][i])
                 else:
-                    responded.append(False)
+                    client_response.append(False)
 
+    #print(numberofiteration)
+    if result_nofhe != result:
+        print("FHE WRONG RESULT")
 
-        start = timeit.default_timer()
-        reference = evaluate(compiled_multfunc, inputs)
-        referenceexecutiontime += (timeit.default_timer() - start) * 1000.0 #ms
-
-    # Change this if you want to output something or comment out the two lines below
-    #for key in outputs:
-    #    print(key, float(outputs[key][0]), float(reference[key][0]))
-
-    #     for key in outputs:
-    #         print(key+":")
-    #         for i in range(len(outputs[key])):
-    #             if i<10:
-    #                 print(float(outputs[key][i]))    
- 
-        mse += valuation_mse(outputs, reference) # since CKKS does approximate computations, this is an important measure that depicts the amount of error
-
-    return compiletime, keygenerationtime, encryptiontime, executiontime, decryptiontime, referenceexecutiontime, mse
+    return t_compiletime, t_keygenerationtime, t_encryptiontime, t_executiontime, t_decryptiontime, t_referenceexecutiontime, t_mse
  
 
 
 if __name__ == "__main__":
-    simcnt = 10 #The number of simulation runs, set it to 3 during development otherwise you will wait for a long time
+    simcnt = 50 #The number of simulation runs, set it to 3 during development otherwise you will wait for a long time
     # For benchmarking you must set it to a large number, e.g., 100
     #Note that file is opened in append mode, previous results will be kept in the file
-    resultfile = open("results.csv", "w")  # Measurement results are collated in this file for you to plot later on
+    resultfile = open("results.csv", "w")  
     resultfile.write("NodeCount,SimCnt,CompileTime,KeyGenerationTime,EncryptionTime,ExecutionTime,DecryptionTime,ReferenceExecutionTime,Mse\n")
     resultfile.close()
     
     print("Simulation campaing started:")
 
-    for nc in range(8,40,4): # Node counts for experimenting various graph sizes
+    for nc in range(12,60,4): # Node counts for experimenting various graph sizes
         n = nc
 
         resultfile = open("results.csv", "a") 
         for i in range(simcnt):
             #Call the simulator
             compiletime, keygenerationtime, encryptiontime, executiontime, decryptiontime, referenceexecutiontime, mse = simulate(n)
-            res = str(n) + "," + str(i) + "," + str(compiletime) + "," + str(keygenerationtime) + "," +  str(encryptiontime) + "," +  str(executiontime) + "," +  str(decryptiontime) + "," +  str(referenceexecutiontime) + "," +  str(mse) + "\n"
-            #res = str(n) + "," + str(i) + "," + "{:.5f}".format(compiletime) + "," + "{:.5f}".format(keygenerationtime) + "," +  "{:.5f}".format(encryptiontime) + "," +  "{:.5f}".format(executiontime) + "," +  "{:.5f}".format(decryptiontime) + "," +  "{:.5f}".format(referenceexecutiontime) + "," +  "{:.9f}".format(mse) + "\n"
-            #print(res)
+            #res = str(n) + "," + str(i) + "," + str(compiletime) + "," + str(keygenerationtime) + "," +  str(encryptiontime) + "," +  str(executiontime) + "," +  str(decryptiontime) + "," +  str(referenceexecutiontime) + "," +  str(mse) + "\n"
+            res = str(n) + "," + str(i) + "," + "{:.5f}".format(compiletime) + "," + "{:.5f}".format(keygenerationtime) + "," +  "{:.5f}".format(encryptiontime) + "," +  "{:.5f}".format(executiontime) + "," +  "{:.5f}".format(decryptiontime) + "," +  "{:.5f}".format(referenceexecutiontime) + "," +  "{:.9f}".format(mse) + "\n"
+            print(res)
             resultfile.write(res)
             
         resultfile.close()

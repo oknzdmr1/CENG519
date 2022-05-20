@@ -12,7 +12,7 @@ def iterativeDFS(graph, initialnode, numberofnodes):
     result = []
 
     while len(stack):
-        print(stack)
+        #print(stack)
         currentnode = stack[-1]
         stack.pop()
 
@@ -26,5 +26,5 @@ def iterativeDFS(graph, initialnode, numberofnodes):
                 if stack.count(i) == 0:
                     if graph[currentnode * numberofnodes + i] == 1:
                         stack.append(i)
-
-    print("DFS Result: " + str(result)) 
+    return result
+    
