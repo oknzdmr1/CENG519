@@ -1,30 +1,17 @@
 from eva import EvaProgram, Input, Output
 import networkx as nx
-from random import random
-import matplotlib.pyplot as plt
-import numpy as np
 from plot import plotResults
-from DFS import iterativeDFS
-from common import evaCommon
-import math
-
+from evaCommon import evaCommon
+import fhe_DFS
 
 ERROR_MARGIN = 0.1
-vector_size = 4096
-initialnode = 0
-numberofnodes = 0
-stack = []  
-client_response = []
-firstpass = True
-finished = False
-result = []
-visited = []
+
 
 # Using networkx, generate a random graph
 # You can change the way you generate the graph
 def generateGraph(n, k, p):
     #ws = nx.cycle_graph(n)
-    ws = nx.watts_strogatz_graph(n,k,p)
+    ws = nx.connected_watts_strogatz_graph(n,k,p)
     return ws
 
 # If there is an edge between two vertices its weight is 1 otherwise it is zero
@@ -32,8 +19,8 @@ def generateGraph(n, k, p):
 # Two dimensional adjacency matrix is represented as a vector
 # Assume there are n vertices
 # (i,j)th element of the adjacency matrix corresponds to (i*n + j)th element in the vector representations
-def serializeGraphZeroOne(GG,vec_size):
-    n = GG.size()
+def serializeGraphZeroOne(GG,n,vec_size):
+    #n = GG.size()
     graphdict = {}
     g = []
     for row in range(n):
@@ -61,123 +48,13 @@ def printGraph(graph,n):
 # Eva will then encrypt them
 def prepareInput(n, m):
     input = {}
-    GG = generateGraph(n,3,0.6)
-    graph, graphdict = serializeGraphZeroOne(GG,m)
+    #k = int(n/2)
+    k = 3
+    GG = generateGraph(n,k,0.5)
+    graph, graphdict = serializeGraphZeroOne(GG,n,m)
     #printGraph(graph,n)
     input['Graph'] = graph
     return input, graph
-
-
-# Shift an element from 'inpos' position to 'outpos' position and mask all others
-def accessElement(graph, inpos, outpos):
-    dummyList = []
-    for i in range(vector_size):
-        if i == outpos:
-            dummyList.append(1)
-        else:
-            dummyList.append(0)
-    
-    numberofshift = inpos - outpos
-    reval = (graph<<numberofshift) * dummyList
-
-    #print(str(inpos) + ", " + str(outpos) + ", " + str(numberofshift))
-    return reval
-
-# Decide if the node is a potential candidate for the next iterations
-def isCheckingRequired(node):
-    if not visited[node]: 
-        if stack.count(node) == 0: 
-            return True
-
-    return False
-
-def visitNode(currentnode):
-    global visited
-    global result
-    global stack
-
-    if not visited[currentnode]:
-        visited[currentnode] = True
-        result.append(currentnode)
-        stack.pop()    
-
-
-# Find all possible adjacent nodes of the current node to ask client if there is an edge
-def findNodes2Check(graph, currentnode, numberofnodes):
-    nodes2check = []
-    for i in range(vector_size):
-        nodes2check.append(0) 
-
-    index = 0
-    for i in range(numberofnodes):
-        if isCheckingRequired(i):   # Add to list
-            newlist = accessElement(graph, currentnode * numberofnodes + i, index)
-            nodes2check = nodes2check + newlist
-            index = index + 1
-  
-    numberofnodes2check = index
-    return nodes2check, numberofnodes2check
-
-    
-
-
-def graphanalticprogram(graph):
-
-    #print("********************************")
-    global firstpass
-    global finished
-    global numberofnodes
-    global client_response
-    global stack
-    global visited
-    global initialnode
-
-    if firstpass:
-        firstpass = False
-        stack.append(initialnode)
-        nodes2check, length = findNodes2Check(graph, initialnode, numberofnodes)
-        return nodes2check
-
-    if not firstpass:
-        
-        currentnode = stack[-1]
-
-        #print("Stack:" + str(stack))
-        #print("Client Response:" + str(client_response))
-        visitNode(currentnode)
-
-        # add the adjacent vetices of the current vertex according to client answer
-        index = 0
-        for i in range(numberofnodes):
-             if isCheckingRequired(i):
-                if client_response[index]:
-                    stack.append(i)
-                index = index + 1    
-
-        while True:
-            # Stack empty. Either all vertices are visited or graph is disconnected. End of the DFS
-            if len(stack) == 0:
-                finished = True
-                print("DFS Result with fhe: " + str(result)) 
-                return graph 
-
-            # Create a list to ask client if there is an edge or not
-            currentnode = stack[-1]
-            nodes2check, length = findNodes2Check(graph, currentnode, numberofnodes)
-            
-            # if there is no edge to ask, continue to iterate the stack
-            if length == 0:
-                visitNode(currentnode)
-            else:
-                break
-
-        return nodes2check
-
-# Calculate required vector size
-def calculateVectorSize(inputsize):
-    x = math.log(inputsize, 2)
-    x = math.ceil(x)
-    return 2**(x+1)
   
 # Do not change this 
 # the parameter n can be passed in the call from simulate function
@@ -199,53 +76,30 @@ class EvaProgramDriver(EvaProgram):
 # If you require additional parameters, add them
 def simulate(n):
     
-    global vector_size
-    global initialnode
-
     # vector size is adapted according to input/output size
-    m = vector_size = calculateVectorSize(n*n)
-    #print("vector size: " + str(vector_size))
+    #m = fhe_DFS.vector_size = fhe_DFS.calculateMinVectorSize(n*n)
+
+    m = fhe_DFS.vector_size
+    fhe_DFS.numberofnodes = n
 
     print("Will start simulation for ", n)
     inputs, g= prepareInput(n, m)
 
-    initialnode = 1 # select node to start
-
-    result_nofhe = iterativeDFS(g, initialnode, n)
-    print("DFS Result no fhe: " + str(result_nofhe)) 
-
     t_compiletime = t_keygenerationtime = t_encryptiontime = t_executiontime = t_decryptiontime = t_referenceexecutiontime = t_mse = 0
-
-    #
-    global finished
-    global visited
-    global numberofnodes
-    global result
-    global firstpass
-    global client_response
-
-    #prepare variables for fhe algorithm
-    numberofnodes = n
-    firstpass = True
-    finished = False
-    result.clear()
-    stack.clear()
-    visited.clear()
-
-    for i in range(numberofnodes):
-        visited.append(False)
 
     numberofiteration = 0 # for debug purpose
 
-    # Run until DFS is finished. At every iteration server prepares a list to ask client if an edge exist or not. After the client response a new iteration begins
-    while not finished:
+    fhe_DFS.refreshVariables()
+
+    # Run until fhe_DFS is finished. At every iteration server prepares a list to ask client if an edge exist or not. After the client response a new iteration begins
+    while not fhe_DFS.finished:
 
         numberofiteration += 1
 
-        graphanaltic = EvaProgramDriver("graphanaltic", vec_size=m,n=n)
+        graphanaltic = EvaProgramDriver("graphanaltic", vec_size=m, n=n)
         with graphanaltic:
             graph = Input('Graph')
-            reval = graphanalticprogram(graph)
+            reval = fhe_DFS.graphanalticprogram(graph)
             Output('ReturnedValue', reval)
     
         prog = graphanaltic
@@ -263,27 +117,26 @@ def simulate(n):
         t_referenceexecutiontime += referenceexecutiontime
         t_mse += mse
 
-        client_response.clear()
+        fhe_DFS.client_response.clear()
 
         # Error Margin can be adopted according to eva parameters. Change in the Eva parameters may require yto change this error margin
         for key in outputs:
-            for i in range(numberofnodes):
+            for i in range(fhe_DFS.numberofnodes):
                 if (outputs[key][i] < 1+ERROR_MARGIN) and (outputs[key][i] > 1-ERROR_MARGIN):
-                    client_response.append(True)
+                    fhe_DFS.client_response.append(True)
                     #print(outputs[key][i])
                 else:
-                    client_response.append(False)
+                    fhe_DFS.client_response.append(False)
 
     #print(numberofiteration)
-    if result_nofhe != result:
-        print("FHE WRONG RESULT")
+
+    print("Number of Iteration: " + str(numberofiteration))
 
     return t_compiletime, t_keygenerationtime, t_encryptiontime, t_executiontime, t_decryptiontime, t_referenceexecutiontime, t_mse
  
 
-
 if __name__ == "__main__":
-    simcnt = 50 #The number of simulation runs, set it to 3 during development otherwise you will wait for a long time
+    simcnt = 100 #The number of simulation runs, set it to 3 during development otherwise you will wait for a long time
     # For benchmarking you must set it to a large number, e.g., 100
     #Note that file is opened in append mode, previous results will be kept in the file
     resultfile = open("results.csv", "w")  
@@ -292,7 +145,7 @@ if __name__ == "__main__":
     
     print("Simulation campaing started:")
 
-    for nc in range(12,60,4): # Node counts for experimenting various graph sizes
+    for nc in range(12,44,4): # Node counts for experimenting various graph sizes
         n = nc
 
         resultfile = open("results.csv", "a") 

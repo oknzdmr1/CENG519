@@ -4,7 +4,6 @@ from eva.seal import generate_keys
 from eva.metric import valuation_mse
 import timeit
 
-
 def evaCommon(prog, inputs):
     config = {}
     config['warn_vec_size'] = 'false'
